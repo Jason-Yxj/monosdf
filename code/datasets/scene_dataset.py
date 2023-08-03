@@ -8,6 +8,7 @@ from utils import rend_util
 from glob import glob
 import cv2
 import random
+import json
 
 class SceneDataset(torch.utils.data.Dataset):
 
@@ -30,23 +31,38 @@ class SceneDataset(torch.utils.data.Dataset):
         
         self.sampling_idx = None
 
-        image_dir = '{0}/image'.format(self.instance_dir)
-        image_paths = sorted(utils.glob_imgs(image_dir))
+        with open(os.path.join(self.instance_dir, 'transforms_train.json'), 'r') as f:
+            data_dict = json.load(f)
+        frames = data_dict['frames']
+
+        # image_dir = '{0}/image'.format(self.instance_dir)
+        # image_paths = sorted(utils.glob_imgs(image_dir))
+        image_paths = [os.path.join(self.instance_dir, frame['file_path']) for frame in frames]
         self.n_images = len(image_paths)
 
-        self.cam_file = '{0}/cameras.npz'.format(self.instance_dir)
-        camera_dict = np.load(self.cam_file)
-        scale_mats = [camera_dict['scale_mat_%d' % idx].astype(np.float32) for idx in range(self.n_images)]
-        world_mats = [camera_dict['world_mat_%d' % idx].astype(np.float32) for idx in range(self.n_images)]
+        # self.cam_file = '{0}/cameras.npz'.format(self.instance_dir)
+        # camera_dict = np.load(self.cam_file)
+        # scale_mats = [camera_dict['scale_mat_%d' % idx].astype(np.float32) for idx in range(self.n_images)]
+        # world_mats = [camera_dict['world_mat_%d' % idx].astype(np.float32) for idx in range(self.n_images)]
 
         self.intrinsics_all = []
         self.pose_all = []
-        for scale_mat, world_mat in zip(scale_mats, world_mats):
-            P = world_mat @ scale_mat
-            P = P[:3, :4]
-            intrinsics, pose = rend_util.load_K_Rt_from_P(None, P)
+        # for scale_mat, world_mat in zip(scale_mats, world_mats):
+        #     P = world_mat @ scale_mat
+        #     P = P[:3, :4]
+        #     intrinsics, pose = rend_util.load_K_Rt_from_P(None, P)
+        #     self.intrinsics_all.append(torch.from_numpy(intrinsics).float())
+        #     self.pose_all.append(torch.from_numpy(pose).float())
+
+        for frame in frames:
+            intrinsics = np.eye(3)
+            intrinsics[0, 0] = frame['fx']
+            intrinsics[1, 1] = frame['fy']
+            intrinsics[0, 2] = frame['cx']
+            intrinsics[1, 2] = frame['cy']
+            pose = frame['transform_matrix']
             self.intrinsics_all.append(torch.from_numpy(intrinsics).float())
-            self.pose_all.append(torch.from_numpy(pose).float())
+            self.pose_all.append(torch.Tensor(pose).float())
 
         self.rgb_images = []
         for path in image_paths:
