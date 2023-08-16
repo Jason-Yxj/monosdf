@@ -15,62 +15,48 @@ import matplotlib.pyplot as plt
 
 image_size = 384
 trans_totensor = transforms.Compose([
-    transforms.CenterCrop(image_size*2),
-    transforms.Resize(image_size, interpolation=PIL.Image.BILINEAR),
-])
-depth_trans_totensor = transforms.Compose([
-    transforms.Resize([968, 1296], interpolation=PIL.Image.NEAREST),
-    transforms.CenterCrop(image_size*2),
-    transforms.Resize(image_size, interpolation=PIL.Image.NEAREST),
+    transforms.Resize(image_size, interpolation=PIL.Image.BILINEAR)
 ])
 
-
-out_path_prefix = '../data/custom'
-data_root = '/home/yuzh/Projects/datasets/scannet/'
-scenes = ['scene0050_00']
-out_names = ['scan1']
+out_path_prefix = 'data/scannet'
+data_root = '/root/picasso/yxj/datasets/scannet/'
+scenes = ['scene0710_00']
+out_names = ['scan2']
 
 for scene, out_name in zip(scenes, out_names):
     out_path = os.path.join(out_path_prefix, out_name)
     os.makedirs(out_path, exist_ok=True)
     print(out_path)
 
-    folders = ["image", "mask", "depth"]
+    folders = ["image", "mask"]
     for folder in folders:
         out_folder = os.path.join(out_path, folder)
         os.makedirs(out_folder, exist_ok=True)
 
-    # load color 
-    color_path = os.path.join(data_root, scene, 'frames', 'color')
-    color_paths = sorted(glob.glob(os.path.join(color_path, '*.jpg')), 
-        key=lambda x: int(os.path.basename(x)[:-4]))
+    with open(os.path.join(data_root, scene, 'transforms_test.json'), 'r') as f:
+        data_dict = json.load(f)
+    frames = data_dict['frames']
+
+    color_paths = [os.path.join(data_root, scene, frame['file_path']) for frame in frames]
     print(color_paths)
-    
-    # load depth
-    depth_path = os.path.join(data_root, scene, 'frames', 'depth')
-    depth_paths = sorted(glob.glob(os.path.join(depth_path, '*.png')), 
-        key=lambda x: int(os.path.basename(x)[:-4]))
-    print(depth_paths)
 
-    # load intrinsic
-    intrinsic_path = os.path.join(data_root, scene, 'frames', 'intrinsic', 'intrinsic_color.txt')
-    camera_intrinsic = np.loadtxt(intrinsic_path)
-    print(camera_intrinsic)
-
-    # load pose
-    pose_path = os.path.join(data_root, scene, 'frames', 'pose')
+    intrinsics = []
     poses = []
-    pose_paths = sorted(glob.glob(os.path.join(pose_path, '*.txt')),
-                        key=lambda x: int(os.path.basename(x)[:-4]))
-    for pose_path in pose_paths:
-        c2w = np.loadtxt(pose_path)
-        poses.append(c2w)
-    poses = np.array(poses)
+    for frame in frames:
+        intrinsic = np.eye(4)
+        intrinsic[0, 0] = frame['fx']
+        intrinsic[1, 1] = frame['fy']
+        intrinsic[0, 2] = frame['cx']
+        intrinsic[1, 2] = frame['cy']
+        pose = frame['transform_matrix']
+
+        intrinsics.append(intrinsic[:3])
+        poses.append(pose)
 
     # deal with invalid poses
-    valid_poses = np.isfinite(poses).all(axis=2).all(axis=1)
-    min_vertices = poses[:, :3, 3][valid_poses].min(axis=0)
-    max_vertices = poses[:, :3, 3][valid_poses].max(axis=0)
+    poses = np.array(poses)
+    min_vertices = poses[:, :3, 3].min(axis=0)
+    max_vertices = poses[:, :3, 3].max(axis=0)
  
     center = (min_vertices + max_vertices) / 2.
     scale = 2. / (np.max(max_vertices - min_vertices) + 3.)
@@ -83,29 +69,28 @@ for scene, out_name in zip(scenes, out_names):
     scale_mat = np.linalg.inv(scale_mat)
 
     # copy image
-    out_index = 0
     cameras = {}
     pcds = []
-    H, W = 968, 1296
+    H, W = 468, 624
 
-    # center crop by 2 * image_size
-    offset_x = (W - image_size * 2) * 0.5
-    offset_y = (H - image_size * 2) * 0.5
-    camera_intrinsic[0, 2] -= offset_x
-    camera_intrinsic[1, 2] -= offset_y
-    # resize from 384*2 to 384
-    resize_factor = 0.5
-    camera_intrinsic[:2, :] *= resize_factor
+    camera_intrinsic = intrinsics[0]
+    # resize
+    resize_scale = image_size / H
+    camera_intrinsic[0] *= resize_scale
+    camera_intrinsic[1] *= resize_scale
+    H, W = H * resize_scale, W * resize_scale
+    # # center crop by image_size
+    # offset_x = (W - image_size) * 0.5
+    # offset_y = (H - image_size) * 0.5
+    # camera_intrinsic[0, 2] -= offset_x
+    # camera_intrinsic[1, 2] -= offset_y
     
     K = camera_intrinsic
     print(K)
     
-    for idx, (valid, pose, depth_path, image_path) in enumerate(zip(valid_poses, poses, depth_paths, color_paths)):
-        print(idx, valid)
-        if idx % 10 != 0: continue
-        if not valid : continue
-        
-        target_image = os.path.join(out_path, "image/%06d.png"%(out_index))
+    for idx, (pose, image_path) in enumerate(zip(poses, color_paths)):        
+        out_index = os.path.splitext(os.path.basename(image_path))[0]
+        target_image = os.path.join(out_path, "image/%s_rgb.png"%(out_index))
         print(target_image)
         img = Image.open(image_path)
         img_tensor = trans_totensor(img)
@@ -113,29 +98,16 @@ for scene, out_name in zip(scenes, out_names):
 
         mask = (np.ones((image_size, image_size, 3)) * 255.).astype(np.uint8)
 
-        target_image = os.path.join(out_path, "mask/%03d.png"%(out_index))
+        target_image = os.path.join(out_path, "mask/%s_mask.png"%(out_index))
         cv2.imwrite(target_image, mask)
-
-        # load depth
-        target_image = os.path.join(out_path, "depth/%06d.png"%(out_index))
-        depth = cv2.imread(depth_path, -1).astype(np.float32) / 1000.
-        #import pdb; pdb.set_trace()
-        depth_PIL = Image.fromarray(depth)
-        new_depth = depth_trans_totensor(depth_PIL)
-        new_depth = np.asarray(new_depth)
-        plt.imsave(target_image, new_depth, cmap='viridis')
-        np.save(target_image.replace(".png", ".npy"), new_depth)
-        
         
         # save pose
         pcds.append(pose[:3, 3])
         pose = K @ np.linalg.inv(pose)
         
         #cameras["scale_mat_%d"%(out_index)] = np.eye(4).astype(np.float32)
-        cameras["scale_mat_%d"%(out_index)] = scale_mat
-        cameras["world_mat_%d"%(out_index)] = pose
-
-        out_index += 1
+        cameras["scale_mat_%s"%(out_index)] = scale_mat
+        cameras["world_mat_%s"%(out_index)] = pose
 
     #np.savez(os.path.join(out_path, "cameras_sphere.npz"), **cameras)
     np.savez(os.path.join(out_path, "cameras.npz"), **cameras)

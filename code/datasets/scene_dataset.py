@@ -150,10 +150,16 @@ class SceneDatasetDN(torch.utils.data.Dataset):
                  scan_id=0,
                  center_crop_type='xxxx',
                  use_mask=False,
-                 num_views=-1
+                 num_views=-1,
+                 mode='train',
                  ):
 
         self.instance_dir = os.path.join('../data', data_dir, 'scan{0}'.format(scan_id))
+        if mode == 'train':
+            self.instance_dir = os.path.join(self.instance_dir, 'train')
+        else:
+            self.instance_dir = os.path.join(self.instance_dir, 'test')
+        # print(self.instance_dir)
 
         self.total_pixels = img_res[0] * img_res[1]
         self.img_res = img_res
@@ -170,13 +176,13 @@ class SceneDatasetDN(torch.utils.data.Dataset):
             data_paths = sorted(data_paths)
             return data_paths
             
-        image_paths = glob_data(os.path.join('{0}'.format(self.instance_dir), "*_rgb.png"))
-        depth_paths = glob_data(os.path.join('{0}'.format(self.instance_dir), "*_depth.npy"))
-        normal_paths = glob_data(os.path.join('{0}'.format(self.instance_dir), "*_normal.npy"))
+        image_paths = glob_data(os.path.join('{0}'.format(self.instance_dir), "image/*_rgb.png"))
+        depth_paths = glob_data(os.path.join('{0}'.format(self.instance_dir), "depth/*_depth.npy"))
+        normal_paths = glob_data(os.path.join('{0}'.format(self.instance_dir), "normal/*_normal.npy"))
         
         # mask is only used in the replica dataset as some monocular depth predictions have very large error and we ignore it
         if use_mask:
-            mask_paths = glob_data(os.path.join('{0}'.format(self.instance_dir), "*_mask.npy"))
+            mask_paths = glob_data(os.path.join('{0}'.format(self.instance_dir), "mask/*_mask.npy"))
         else:
             mask_paths = None
 
@@ -184,8 +190,10 @@ class SceneDatasetDN(torch.utils.data.Dataset):
         
         self.cam_file = '{0}/cameras.npz'.format(self.instance_dir)
         camera_dict = np.load(self.cam_file)
-        scale_mats = [camera_dict['scale_mat_%d' % idx].astype(np.float32) for idx in range(self.n_images)]
-        world_mats = [camera_dict['world_mat_%d' % idx].astype(np.float32) for idx in range(self.n_images)]
+        idx_list = [os.path.splitext(os.path.basename(frame))[0] for frame in image_paths]
+        idx_list = [idx.replace('_rgb', '') for idx in idx_list]
+        scale_mats = [camera_dict['scale_mat_%s' % idx].astype(np.float32) for idx in idx_list]
+        world_mats = [camera_dict['world_mat_%s' % idx].astype(np.float32) for idx in idx_list]
 
         self.intrinsics_all = []
         self.pose_all = []
@@ -257,9 +265,9 @@ class SceneDatasetDN(torch.utils.data.Dataset):
         return self.n_images
 
     def __getitem__(self, idx):
-        if self.num_views >= 0:
-            image_ids = [25, 22, 28, 40, 44, 48, 0, 8, 13][:self.num_views]
-            idx = image_ids[random.randint(0, self.num_views - 1)]
+        # if self.num_views >= 0:
+        #     image_ids = [25, 22, 28, 40, 44, 48, 0, 8, 13][:self.num_views]
+        #     idx = image_ids[random.randint(0, self.num_views - 1)]
         
         uv = np.mgrid[0:self.img_res[0], 0:self.img_res[1]].astype(np.int32)
         uv = torch.from_numpy(np.flip(uv, axis=0).copy()).float()
