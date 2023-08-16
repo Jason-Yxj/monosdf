@@ -25,6 +25,12 @@ def plot(implicit_network, indices, plot_data, path, epoch, img_res, plot_nimgs,
         # plot depth maps
         plot_depth_maps(plot_data['depth_map'], plot_data['depth_gt'], path, epoch, plot_nimgs, img_res, indices)
 
+        # save pc
+        pred_points = trimesh.PointCloud(vertices=plot_data['pred_points'][:, :3], colors=plot_data['pred_points'][:, 3:])
+        gt_points = trimesh.PointCloud(vertices=plot_data['gt_points'][:, :3], colors=plot_data['gt_points'][:, 3:])
+        pred_points.export(f'{path}/pred_{epoch}_{indices[0]}.ply')
+        gt_points.export(f'{path}/gt_{epoch}_{indices[0]}.ply')
+        
         # concat output images to single large image
         images = []
         for name in ["rendering", "depth", "normal"]:
